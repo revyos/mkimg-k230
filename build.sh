@@ -28,8 +28,7 @@ function build_linux() {
     cp -v ${LINUX_BUILD}/arch/riscv/boot/Image ${OUTPUT_DIR}/Image_${ABI}
     cp -v Documentation/admin-guide/kdump/gdbmacros.txt ${OUTPUT_DIR}/gdbmacros_${ABI}.txt
     cp -v ${LINUX_BUILD}/arch/riscv/boot/dts/canaan/k230_evb.dtb ${OUTPUT_DIR}/k230_evb_${ABI}.dtb
-    # linux dts name error: cammv -> canmv
-    cp -v ${LINUX_BUILD}/arch/riscv/boot/dts/canaan/k230_cammv.dtb ${OUTPUT_DIR}/k230_canmv_${ABI}.dtb
+    cp -v ${LINUX_BUILD}/arch/riscv/boot/dts/canaan/k230_canmv.dtb ${OUTPUT_DIR}/k230_canmv_${ABI}.dtb
   popd
 }
 
