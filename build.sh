@@ -5,6 +5,7 @@ set -eu
 # ci redefined
 BUILD_DIR=${BUILD_DIR:-build}
 OUTPUT_DIR=${OUTPUT_DIR:-output}
+VENV_DIR=${VENV_DIR:-venv}
 ABI=${ABI:-rv64}
 BOARD=${BOARD:-canmv}
 ARCH=${ARCH:-riscv}
@@ -12,11 +13,12 @@ CROSS_COMPILE=${CROSS_COMPILE:-riscv64-unknown-linux-gnu-}
 
 LINUX_BUILD=${LINUX_BUILD:-build}
 OPENSBI_BUILD=${OPENSBI_BUILD:-build}
-UBOOT_BUILD=${UBOOT_BUILD:-build-${BOARD}}
+UBOOT_BUILD=${UBOOT_BUILD:-build-uboot}
 
 mkdir -p ${BUILD_DIR} ${OUTPUT_DIR}
 
 OUTPUT_DIR=$(readlink -f ${OUTPUT_DIR})
+SCRIPT_DIR=$(readlink -f $(dirname $0))
 
 function build_linux() {
   pushd linux
@@ -53,8 +55,8 @@ function build_opensbi() {
 }
 
 function build_uboot() {
-  python3 -m venv venv
-  source venv/bin/activate
+  python3 -m venv ${VENV_DIR}
+  source ${VENV_DIR}/bin/activate
   pip install gmssl
   pushd uboot
   {
@@ -68,8 +70,13 @@ function build_uboot() {
 }
 
 function cleanup_build() {
-  rm -rvf ${OUTPUT_DIR} ${BUILD_DIR}
-  rm -rvf uboot/${UBOOT_BUILD} opensbi/${OPENSBI_BUILD} linux/${LINUX_BUILD}
+  pushd ${SCRIPT_DIR}
+  {
+    rm -rvf ${OUTPUT_DIR} ${BUILD_DIR}
+    rm -rvf uboot/${UBOOT_BUILD} opensbi/${OPENSBI_BUILD} linux/${LINUX_BUILD}
+    rm -rvf ${VENV_DIR}
+  }
+  popd
 }
 
 function usage() {
