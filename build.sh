@@ -62,6 +62,40 @@ function build_uboot() {
   deactivate
 }
 
-#build_linux
-#build_opensbi
-#build_uboot
+function cleanup_build() {
+  rm -rvf ${OUTPUT_DIR} ${BUILD_DIR}
+  rm -rvf uboot/${UBOOT_BUILD} opensbi/${OPENSBI_BUILD} linux/${LINUX_BUILD}
+}
+
+function usage() {
+  echo "Usage: $0 build/clean"
+}
+
+function main() {
+
+  if [[ $# < 1 ]]; then
+    usage
+    exit 1
+  fi
+
+  if [ "$1" = "build" ]; then
+    if [ "$2" = "linux" ]; then
+      build_linux
+    elif [ "$2" = "opensbi" ]; then
+      build_opensbi
+    elif [ "$2" = "uboot" ]; then
+      build_uboot
+    elif [ "$2" = "all" ]; then
+      build_linux
+      build_opensbi
+      build_uboot
+    else
+      usage
+      exit 1
+    fi
+  elif [ "$1" = "clean" ]; then
+    cleanup_build
+  fi
+}
+
+main $@
