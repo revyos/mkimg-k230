@@ -90,7 +90,7 @@ function build_rootfs() {
     "deb https://mirror.iscas.ac.cn/revyos/revyos-base/ sid main contrib non-free non-free-firmware" 
   else
     mmdebstrap --architectures=riscv64 \
-    --include="ca-certificates locales dosfstools bash iperf3 \
+    --include="ca-certificates locales dosfstools bash iperf3 debian-keyring \
         sudo bash-completion network-manager openssh-server systemd-timesyncd cloud-utils" \
     sid "$CHROOT_TARGET" \
     "deb https://deb.debian.org/debian/ sid main contrib non-free non-free-firmware"
@@ -98,6 +98,7 @@ function build_rootfs() {
 
   chroot $CHROOT_TARGET /bin/bash <<EOF
 # apt update
+sed -i 's#deb [trusted=yes] http#deb http#g' /etc/apt/sources.list
 apt update
 
 # Add user
@@ -135,6 +136,10 @@ function build_img() {
     --inputpath "${OUTPUT_DIR}" \
     --outputpath "${OUTPUT_DIR}" \
     --rootpath="$(mktemp -d)"
+}
+
+function fix_permissions() {
+  chown -R $USER ${OUTPUT_DIR}
 }
 
 function cleanup_build() {
@@ -180,6 +185,7 @@ function main() {
     elif [ "$2" = "rootfs" ]; then
       check_euid_root
       build_rootfs
+      fix_permissions
     elif [ "$2" = "img" ]; then
       build_img
     elif [ "$2" = "linux_opensbi_uboot" ]; then
@@ -193,6 +199,7 @@ function main() {
       build_uboot
       build_rootfs
       build_img
+      fix_permissions
     else
       fault
     fi

@@ -1,0 +1,153 @@
+name: mkimg-k230-ci
+
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  xuantie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1698113812618
+  toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.8.0-20231018.tar.gz
+  mainline_toolchain: https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2023.10.18
+  mainline_toolchain_file_name: riscv64-glibc-ubuntu-22.04-gcc-nightly-2023.10.18-nightly.tar.gz
+  wget_alias: 'wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 0'
+  ARCH: riscv
+  CROSS_COMPILE: riscv64-unknown-linux-gnu-
+  KBUILD_BUILD_USER: builder
+  KBUILD_BUILD_HOST: revyos-riscv-builder
+  KDEB_COMPRESS: xz
+  KDEB_CHANGELOG_DIST: unstable
+  OUTPUT: output
+
+
+jobs:
+  mkrootfs:
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [canmv, evb]
+        distro: [revyos, debian]
+        abi: [rv64]
+
+    runs-on: ubuntu-22.04
+    env:
+      BOARD: ${{ matrix.model }}
+      DISTRO: ${{ matrix.distro }}
+      ABI: ${{ matrix.abi }}
+
+    steps:
+      - name: Create Timestamp
+        run: |
+              echo "BUILD_ID=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_ENV
+              echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+              
+
+      - name: Install Software
+        run: |
+              sudo apt update && \
+              sudo apt install -y gdisk dosfstools build-essential autoconf automake autotools-dev ninja-build make \
+                                  libncurses-dev gawk flex bison openssl libssl-dev tree \
+                                  qemu-user-static binfmt-support mmdebstrap zstd libconfuse-dev mtools debian-keyring debian-archive-keyring
+              ${wget_alias} https://mirror.iscas.ac.cn/revyos/revyos-addons/pool/main/r/revyos-keyring/revyos-keyring_2023.06.12_all.deb
+              sudo apt install ./revyos-keyring_2023.06.12_all.deb
+              ${wget_alias} ${mainline_toolchain}/${mainline_toolchain_file_name}
+              tar -xvf ${mainline_toolchain_file_name} -C /opt
+              rm -rf ${mainline_toolchain_file_name}
+              export PATH="/opt/riscv/bin:$PATH"
+              echo "PATH=${PATH}" >> $GITHUB_ENV
+
+      - name: Checkout genimage
+        uses: actions/checkout@v4
+        with:
+          repository: pengutronix/genimage
+          path: genimage
+          ref: v17
+
+      - name: build genimage
+        run: |
+            pushd genimage
+              ./autogen.sh
+              ./configure
+              make -j$(nproc)
+              sudo make install
+            popd
+
+      - name: Checkout qemu
+        uses: actions/checkout@v4
+        if: ${{ matrix.distro == 'revyos' }}
+        with:
+          repository: revyos/qemu
+          path: qemu
+          ref: ab8f84892a89feea60f1bb24432ff58ce6d2885c  # TODO: remove this line
+
+      - name: build qemu
+        if: ${{ matrix.distro == 'revyos' }}
+        run: |
+            pushd qemu
+              ./configure \
+                --prefix=$HOME/qemu-install \
+                --static \
+                --target-list=riscv64-linux-user \
+                --disable-system \
+                --disable-pie \
+                --interp-prefix=/etc/qemu-binfmt/%M
+              make -j$(nproc)
+              make install
+
+              sudo cp -fv $HOME/qemu-install/bin/qemu-riscv64 /usr/bin/qemu-riscv64-static
+            popd
+            ls -al /usr/bin/qemu-riscv64-static
+            sudo dpkg-reconfigure binfmt-support
+
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Make Image
+        run: |
+              # make revyos-release on CI
+              echo "BUILD_ID=${{ env.BUILD_ID }}" >> revyos-release
+              echo "BUILD_DATE=${{ env.BUILD_DATE }}" >> revyos-release
+              echo "RELEASE_ID=${{ github.ref_name }}" >> revyos-release
+              echo "COMMIT_ID=${{ github.sha }}" >> revyos-release
+              echo "RUNNER_ID=${{ github.run_id }}" >> revyos-release
+
+              # workaround for
+              sed -i "s#deb http#deb [trusted=yes] http#g" ./build.sh
+
+              sudo -E --preserve-env=PATH bash ./build.sh build all
+              # fix permissions
+              sudo chown -R $USER:$USER output
+
+      - name: Make Checksum file & Compress files
+        run: |
+            pushd ${OUTPUT}
+              mv sysimage-sdcard*.img k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}.img
+              sha256sum k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}.img k230_${{ env.BOARD }}_${{ env.ABI }}.bin > SHA256SUMS
+              sha512sum k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}.img k230_${{ env.BOARD }}_${{ env.ABI }}.bin > SHA512SUMS
+              zstd k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}.img
+            popd
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 30
+          name: k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}
+          path: |
+                  ${{ env.OUTPUT }}/k230-sdcard-${{ env.DISTRO }}-${{ env.BOARD }}.img
+                  ${{ env.OUTPUT }}/k230_${{ env.BOARD }}_${{ env.ABI }}.bin
+                  ${{ env.OUTPUT }}/SHA256SUMS
+                  ${{ env.OUTPUT }}/SHA512SUMS
+
+      - name: 'Create release by tag'
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+                  ${{ env.OUTPUT }}/*.img.zst
+          token: ${{ secrets.GITHUB_TOKEN }}
