@@ -12,7 +12,7 @@ ARCH=${ARCH:-riscv}
 CROSS_COMPILE=${CROSS_COMPILE:-riscv64-unknown-linux-gnu-}
 TIMESTAMP=${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}
 
-DEB_REPO='deb https://mirror.iscas.ac.cn/debian/ sid main contrib non-free non-free-firmware'
+DISTRO=${DISTRO:-revyos} # revyos or debian
 CHROOT_TARGET=${CHROOT_TARGET:-target}
 ROOTFS_IMAGE_SIZE=2G
 ROOTFS_IMAGE_FILE="k230_root.ext4"
@@ -81,10 +81,20 @@ function build_rootfs() {
 
   mount ${OUTPUT_DIR}/${ROOTFS_IMAGE_FILE} ${CHROOT_TARGET}
 
-  mmdebstrap --architectures=riscv64 \
+  if [[ $DISTRO == "revyos" ]]; then
+    mmdebstrap --architectures=riscv64 \
+    --include="ca-certificates locales dosfstools bash iperf3 revyos-keyring \
+        sudo bash-completion network-manager openssh-server systemd-timesyncd cloud-utils" \
+    sid "$CHROOT_TARGET" \
+    "deb https://mirror.iscas.ac.cn/revyos/revyos-addons/ revyos-addons main" \
+    "deb https://mirror.iscas.ac.cn/revyos/revyos-base/ sid main contrib non-free non-free-firmware" 
+  else
+    mmdebstrap --architectures=riscv64 \
     --include="ca-certificates locales dosfstools bash iperf3 \
         sudo bash-completion network-manager openssh-server systemd-timesyncd cloud-utils" \
-    sid "$CHROOT_TARGET" "${DEB_REPO}"
+    sid "$CHROOT_TARGET" \
+    "deb https://deb.debian.org/debian/ sid main contrib non-free non-free-firmware"
+  fi
 
   chroot $CHROOT_TARGET /bin/bash <<EOF
 # apt update
@@ -95,8 +105,8 @@ useradd -m -s /bin/bash -G adm,sudo debian
 echo 'debian:debian' | chpasswd
 
 # Change hostname
-echo revyos-${BOARD} > /etc/hostname
-echo 127.0.1.1 revyos-${BOARD} >> /etc/hosts
+echo ${DISTRO}-${BOARD} > /etc/hostname
+echo 127.0.1.1 ${DISTRO}-${BOARD} >> /etc/hosts
 
 # Disable iperf3
 systemctl disable iperf3
