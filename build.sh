@@ -20,6 +20,7 @@ OUTPUT_DIR=$(readlink -f ${OUTPUT_DIR})
 
 function build_linux() {
   pushd linux
+  {
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} O=${LINUX_BUILD} k230_evb_linux_enable_vector_defconfig
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} O=${LINUX_BUILD} -j$(nproc) dtbs
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} O=${LINUX_BUILD} -j$(nproc)
@@ -29,11 +30,13 @@ function build_linux() {
     cp -v Documentation/admin-guide/kdump/gdbmacros.txt ${OUTPUT_DIR}/gdbmacros_${ABI}.txt
     cp -v ${LINUX_BUILD}/arch/riscv/boot/dts/canaan/k230_evb.dtb ${OUTPUT_DIR}/k230_evb_${ABI}.dtb
     cp -v ${LINUX_BUILD}/arch/riscv/boot/dts/canaan/k230_canmv.dtb ${OUTPUT_DIR}/k230_canmv_${ABI}.dtb
+  }
   popd
 }
 
 function build_opensbi() {
   pushd opensbi
+  {
     make \
       ARCH=${ARCH} \
       CROSS_COMPILE=${CROSS_COMPILE} \
@@ -44,8 +47,8 @@ function build_opensbi() {
       FW_PAYLOAD_PATH=${OUTPUT_DIR}/Image_${ABI} \
       FW_TEXT_START=0x0 \
       -j $(nproc)
-
     cp -v ${OPENSBI_BUILD}/platform/generic/firmware/fw_payload.bin ${OUTPUT_DIR}/k230_${BOARD}_${ABI}.bin
+  }
   popd
 }
 
@@ -54,10 +57,12 @@ function build_uboot() {
   source venv/bin/activate
   pip install gmssl
   pushd uboot
+  {
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} O=${UBOOT_BUILD} k230_${BOARD}_defconfig
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} O=${UBOOT_BUILD} -j$(nproc)
     cp -av ${UBOOT_BUILD}/u-boot-spl-k230.bin ${OUTPUT_DIR}/u-boot-spl-k230_${BOARD}.bin
     cp -av ${UBOOT_BUILD}/fn_u-boot.img ${OUTPUT_DIR}/fn_u-boot_${BOARD}.img
+  }
   popd
   deactivate
 }
@@ -71,11 +76,15 @@ function usage() {
   echo "Usage: $0 build/clean"
 }
 
+function fault() {
+  usage
+  exit 1
+}
+
 function main() {
 
   if [[ $# < 1 ]]; then
-    usage
-    exit 1
+    fault
   fi
 
   if [ "$1" = "build" ]; then
@@ -90,11 +99,12 @@ function main() {
       build_opensbi
       build_uboot
     else
-      usage
-      exit 1
+      fault
     fi
   elif [ "$1" = "clean" ]; then
     cleanup_build
+  else
+    fault
   fi
 }
 
