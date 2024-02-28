@@ -10,12 +10,18 @@ ABI=${ABI:-rv64}
 BOARD=${BOARD:-canmv}
 ARCH=${ARCH:-riscv}
 CROSS_COMPILE=${CROSS_COMPILE:-riscv64-unknown-linux-gnu-}
+TIMESTAMP=${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}
+
+DEB_REPO='deb https://mirror.iscas.ac.cn/debian/ sid main contrib non-free non-free-firmware'
+CHROOT_TARGET=${CHROOT_TARGET:-target}
+ROOTFS_IMAGE_SIZE=2G
+ROOTFS_IMAGE_FILE="k230_root.ext4"
 
 LINUX_BUILD=${LINUX_BUILD:-build}
 OPENSBI_BUILD=${OPENSBI_BUILD:-build}
 UBOOT_BUILD=${UBOOT_BUILD:-build-uboot}
 
-mkdir -p ${BUILD_DIR} ${OUTPUT_DIR}
+mkdir -p ${BUILD_DIR} ${OUTPUT_DIR} ${CHROOT_TARGET}
 
 OUTPUT_DIR=$(readlink -f ${OUTPUT_DIR})
 SCRIPT_DIR=$(readlink -f $(dirname $0))
@@ -69,10 +75,57 @@ function build_uboot() {
   deactivate
 }
 
+function build_rootfs() {
+  truncate -s ${ROOTFS_IMAGE_SIZE} ${OUTPUT_DIR}/${ROOTFS_IMAGE_FILE}
+  mkfs.ext4 -F -L rootfs ${OUTPUT_DIR}/${ROOTFS_IMAGE_FILE}
+
+  mount ${OUTPUT_DIR}/${ROOTFS_IMAGE_FILE} ${CHROOT_TARGET}
+
+  mmdebstrap --architectures=riscv64 \
+    --include="ca-certificates locales dosfstools bash iperf3 \
+        sudo bash-completion network-manager openssh-server systemd-timesyncd cloud-utils" \
+    sid "$CHROOT_TARGET" "${DEB_REPO}"
+
+  chroot $CHROOT_TARGET /bin/bash <<EOF
+# apt update
+apt update
+
+# Add user
+useradd -m -s /bin/bash -G adm,sudo debian
+echo 'debian:debian' | chpasswd
+
+# Change hostname
+echo revyos-${BOARD} > /etc/hostname
+echo 127.0.1.1 revyos-${BOARD} >> /etc/hosts
+
+# Disable iperf3
+systemctl disable iperf3
+
+# Set default timezone to Asia/Shanghai
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+echo "Asia/Shanghai" > /etc/timezone
+
+exit
+EOF
+
+  if [ ! -f revyos-release ]; then
+    echo "$TIMESTAMP" > $CHROOT_TARGET/etc/revyos-release
+  else
+    cp -v revyos-release $CHROOT_TARGET/etc/revyos-release
+  fi
+
+  # clean source
+  rm -vrf $CHROOT_TARGET/var/lib/apt/lists/*
+
+  umount ${CHROOT_TARGET}
+}
+
 function cleanup_build() {
+  check_euid_root
   pushd ${SCRIPT_DIR}
   {
-    rm -rvf ${OUTPUT_DIR} ${BUILD_DIR}
+    mountpoint -q ${CHROOT_TARGET} && umount -l ${CHROOT_TARGET}
+    rm -rvf ${OUTPUT_DIR} ${BUILD_DIR} ${CHROOT_TARGET}
     rm -rvf uboot/${UBOOT_BUILD} opensbi/${OPENSBI_BUILD} linux/${LINUX_BUILD}
     rm -rvf ${VENV_DIR}
   }
@@ -88,8 +141,14 @@ function fault() {
   exit 1
 }
 
-function main() {
+function check_euid_root() {
+  if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as root"
+    exit 1
+  fi
+}
 
+function main() {
   if [[ $# < 1 ]]; then
     fault
   fi
@@ -101,10 +160,15 @@ function main() {
       build_opensbi
     elif [ "$2" = "uboot" ]; then
       build_uboot
+    elif [ "$2" = "rootfs" ]; then
+      check_euid_root
+      build_rootfs
     elif [ "$2" = "all" ]; then
+      check_euid_root
       build_linux
       build_opensbi
       build_uboot
+      build_rootfs
     else
       fault
     fi
