@@ -120,6 +120,13 @@ EOF
   umount ${CHROOT_TARGET}
 }
 
+function build_img() {
+  genimage --config configs/${BOARD}.cfg \
+    --inputpath "${OUTPUT_DIR}" \
+    --outputpath "${OUTPUT_DIR}" \
+    --rootpath="$(mktemp -d)"
+}
+
 function cleanup_build() {
   check_euid_root
   pushd ${SCRIPT_DIR}
@@ -163,12 +170,19 @@ function main() {
     elif [ "$2" = "rootfs" ]; then
       check_euid_root
       build_rootfs
+    elif [ "$2" = "img" ]; then
+      build_img
+    elif [ "$2" = "linux_opensbi_uboot" ]; then
+      build_linux
+      build_opensbi
+      build_uboot
     elif [ "$2" = "all" ]; then
       check_euid_root
       build_linux
       build_opensbi
       build_uboot
       build_rootfs
+      build_img
     else
       fault
     fi
